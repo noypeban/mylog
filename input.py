@@ -9,7 +9,10 @@ import readline
 import datetime, time
 import sqlite3
 
-connection = sqlite3.connect("/home/watanab2/diary/data.db",isolation_level=None,detect_types=sqlite3.PARSE_DECLTYPES)
+dirpath = os.path.dirname(os.path.abspath(__file__))
+dbpath = dirpath + "/data.db"
+
+connection = sqlite3.connect(dbpath,isolation_level=None,detect_types=sqlite3.PARSE_DECLTYPES)
 connection.text_factory = str
 cursor = connection.cursor()
 sql = u"""
@@ -37,7 +40,7 @@ print '==='
 
 print 'Enter memo body'
 print '---'
-tmp_file = tempfile.mkstemp(suffix=".md")
+tmp_file = tempfile.mkstemp(suffix=".mkd")
 subprocess.call(['vim', tmp_file[1]])
 
 f = open(tmp_file[1])

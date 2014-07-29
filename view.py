@@ -19,6 +19,10 @@ class mylog(object):
 
         self.connection = sqlite3.connect(self.dbpath,isolation_level=None,detect_types=sqlite3.PARSE_DECLTYPES)
         self.connection.text_factory = str
+        self.all_category = None
+
+    def all_category(self):
+        self.all_category = map(lambda lst: lst[0], self.connection.execute(u"select distinct category from category").fetchall())
 
     def get_entry(self,id=1):
         entry = self.connection.execute(u"select * from entry where id=%s" % id).fetchone()
@@ -30,15 +34,71 @@ class mylog(object):
             category = None
         return entry, category
 
-    def curses_main(self,args):
+    def new_entry(self):
+        category = []
+
+        print 'App for my memo.'
+        print '==='
+
+        print 'Enter memo body'
+        print '---'
+        tmp_file = tempfile.mkstemp(suffix=".mkd")
+        subprocess.call(['vim', tmp_file[1]])
+
+        f = open(tmp_file[1])
+        body = f.read()
+        f.close()
+        os.remove(tmp_file[1])
+#body = sys.stdin.read()
+        cursor = self.connection.cursor()
+
+        print body
+
+        readline.parse_and_bind('tab: complete')
+        readline.parse_and_bind('set editing-mode vi')
+
+        def completer(text, state):
+            options = [x for x in addr if x.startswith(text)]
+            try:
+                return options[state]
+            except IndexError:
+                return None
+
+        readline.set_completer(completer)
+
+        print 'Enter category'
+        while True:
+            line = raw_input('>>> ')
+            if line == '':
+                break
+            category.append(line)
+            print category
+
+        sql = u"insert into entry values (null, ?, ?)"
+        cursor.execute(sql, (datetime.datetime.now(), body))
+        lastid = cursor.lastrowid
+        sql = u"insert into category values (?, ?)"
+        for cat in category:
+            cursor.execute(sql, (lastid, cat))
+
+        self.connection.commit()
+        self.connection.close()
+
+    def curses_main(self,screen):
+        cursor = self.connection.cursor()
         win = curses.initscr()
+        curses.use_default_colors()
         curses.noecho()
         curses.cbreak()
         lastid = self.connection.execute(u"select max(id) from entry").fetchone()[0]
         id = self.display_entry(win, lastid)
         while 1:
             c = win.getkey()
-            if c == "n":
+#append new entry
+            if c == "a":
+                self.new_entry()
+                id = id
+            elif c == "n":
                 id = self.display_entry(win, id, -1)
             elif c == "p":
                 id = self.display_entry(win, id, 1)
@@ -47,6 +107,7 @@ class mylog(object):
             win.refresh()
         curses.endwin()
         self.connection.close()
+
     def display_entry(self,win,id,offset=0):
         entry, category = self.get_entry(id+offset)
 

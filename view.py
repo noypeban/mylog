@@ -21,8 +21,14 @@ class mylog(object):
         self.connection.text_factory = str
         self.all_category = None
 
-    def all_category(self):
-        self.all_category = map(lambda lst: lst[0], self.connection.execute(u"select distinct category from category").fetchall())
+        self.win = curses.initscr()
+        curses.start_color()
+        curses.use_default_colors()
+        curses.noecho()
+        curses.cbreak()
+
+    def update_category(self):
+        self.allupdate_category = map(lambda lst: lst[0], self.connection.execute(u"select distinct category from category").fetchall())
 
     def get_entry(self,id=1):
         entry = self.connection.execute(u"select * from entry where id=%s" % id).fetchone()
@@ -35,13 +41,16 @@ class mylog(object):
         return entry, category
 
     def new_entry(self):
+        self.win.clear()
+        self.update_category()
         category = []
+        y = 0
 
-        print 'App for my memo.'
-        print '==='
+        self.win.addstr(y,0,'App for my memo.');y+=1
+        self.win.addstr(y,0,'===');y+=1
 
-        print 'Enter memo body'
-        print '---'
+        self.win.addstr(y,0,'Enter memo body');y+=1
+        self.win.addstr(y,0,'---');y+=1
         tmp_file = tempfile.mkstemp(suffix=".mkd")
         subprocess.call(['vim', tmp_file[1]])
 
@@ -52,7 +61,7 @@ class mylog(object):
 #body = sys.stdin.read()
         cursor = self.connection.cursor()
 
-        print body
+        self.win.addstr(y,0, body);y+=1
 
         readline.parse_and_bind('tab: complete')
         readline.parse_and_bind('set editing-mode vi')
@@ -66,13 +75,16 @@ class mylog(object):
 
         readline.set_completer(completer)
 
-        print 'Enter category'
+        self.win.addstr(y,0, 'Enter category');y+=1
         while True:
-            line = raw_input('>>> ')
+            #line = raw_input('>>> ')
+            curses.echo()
+            line = self.win.getstr(y,0);y+=1
+            curses.noecho()
             if line == '':
                 break
             category.append(line)
-            print category
+            self.win.addstr(y,0, ",".join(category));y+=1
 
         sql = u"insert into entry values (null, ?, ?)"
         cursor.execute(sql, (datetime.datetime.now(), body))
@@ -82,43 +94,39 @@ class mylog(object):
             cursor.execute(sql, (lastid, cat))
 
         self.connection.commit()
-        self.connection.close()
+        #self.connection.close()
 
     def curses_main(self,screen):
         cursor = self.connection.cursor()
-        win = curses.initscr()
-        curses.use_default_colors()
-        curses.noecho()
-        curses.cbreak()
         lastid = self.connection.execute(u"select max(id) from entry").fetchone()[0]
-        id = self.display_entry(win, lastid)
+        id = self.display_entry(lastid)
         while 1:
-            c = win.getkey()
+            c = self.win.getkey()
 #append new entry
             if c == "a":
                 self.new_entry()
                 id = id
             elif c == "n":
-                id = self.display_entry(win, id, -1)
+                id = self.display_entry(id, -1)
             elif c == "p":
-                id = self.display_entry(win, id, 1)
+                id = self.display_entry(id, 1)
             elif c == "q":
                 break
-            win.refresh()
+            self.win.refresh()
         curses.endwin()
         self.connection.close()
 
-    def display_entry(self,win,id,offset=0):
+    def display_entry(self,id,offset=0):
         entry, category = self.get_entry(id+offset)
 
         if entry is not None:
-            win.erase()
+            self.win.erase()
             entry_date = entry[1].strftime('%Y/%m/%d%A %H:%M:%S')
             category = "category:" + ",".join(category)
 
-            win.addstr(0,0,entry_date)
-            win.addstr(1,0,category)
-            win.addstr(3,0,entry[2])
+            self.win.addstr(0,0,entry_date)
+            self.win.addstr(1,0,category)
+            self.win.addstr(3,0,entry[2])
             return entry[0]
         else:
             return id

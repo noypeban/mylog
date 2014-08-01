@@ -6,7 +6,6 @@ import os
 import subprocess
 import tempfile
 import sys
-import readline
 import datetime, time
 import sqlite3
 import locale
@@ -14,24 +13,37 @@ locale.setlocale(locale.LC_ALL, '')
 
 class mylog(object):
     def __init__(self):
-        self.dirpath = os.path.dirname(os.path.abspath(__file__))
-        self.dbpath = self.dirpath + "/data.db"
+        #self.dbpath = "/home/watanab2/.mylog.db"
+        self.dbpath = "/home/watanab2/diary/data.db"
 
         self.connection = sqlite3.connect(self.dbpath,isolation_level=None,detect_types=sqlite3.PARSE_DECLTYPES)
         self.connection.text_factory = str
         self.all_category = None
 
-        self.win = curses.initscr()
+        self.masterwin = curses.initscr()
+        self.max_y, self.max_x = self.masterwin.getmaxyx()
+        self.win = curses.newpad(100,self.max_x)
+        self.win.scrollok(True)
+        self.win.idlok(True)
+        self.win.setscrreg(2,self.max_y-1)
+        self.statusline = self.win.subwin(self.max_y-1,0)
         curses.start_color()
         curses.use_default_colors()
         curses.noecho()
         curses.cbreak()
 
+        self.mode = None
+
     def update_category(self):
         self.allupdate_category = map(lambda lst: lst[0], self.connection.execute(u"select distinct category from category").fetchall())
 
-    def get_entry(self,id=1):
-        entry = self.connection.execute(u"select * from entry where id=%s" % id).fetchone()
+    def get_entry(self,id,offset):
+        if offset == 0:
+            entry = self.connection.execute(u"select * from entry where id=%s" % id).fetchone()
+        elif offset == 1:
+            entry = self.connection.execute(u"select * from entry where id>%s limit 1" % id).fetchone()
+        elif offset == -1:
+            entry = self.connection.execute(u"select * from entry where id<%s order by id desc limit 1" % id).fetchone()
         if entry is not None:
             category = map(lambda lst: lst[0], self.connection.execute(
                         u"select category from category where id=%s" % entry[0])
@@ -40,31 +52,39 @@ class mylog(object):
             category = None
         return entry, category
 
-    def new_entry(self):
+    def gety(self,win):
+        y,x = win.getyx()
+        return y+1
+
+    def new_entry(self,id=None):
         self.win.clear()
         self.update_category()
         category = []
-        y = 0
 
-        self.win.addstr(y,0,'App for my memo.');y+=1
-        self.win.addstr(y,0,'===');y+=1
+        if id:
+            entry, org_category = self.get_entry(id,0)
+            body = entry[2]
 
-        self.win.addstr(y,0,'Enter memo body');y+=1
-        self.win.addstr(y,0,'---');y+=1
-        tmp_file = tempfile.mkstemp(suffix=".mkd")
+        self.win.addstr(self.gety(self.win)-1,0,'App for my memo.');
+        self.win.addstr(self.gety(self.win),0,'===');
+
+        self.win.addstr(self.gety(self.win),0,'Enter memo body');
+        self.win.addstr(self.gety(self.win),0,'---');
+        self.refresh()
+        tmp_file = tempfile.mkstemp(suffix="_edit_entry.md")
+        if id:
+            f = open(tmp_file[1],'w')
+            f.write(body)
+            f.close()
         subprocess.call(['vim', tmp_file[1]])
 
         f = open(tmp_file[1])
-        body = f.read()
+        body = f.read().rstrip()
         f.close()
         os.remove(tmp_file[1])
-#body = sys.stdin.read()
-        cursor = self.connection.cursor()
 
-        self.win.addstr(y,0, body);y+=1
-
-        readline.parse_and_bind('tab: complete')
-        readline.parse_and_bind('set editing-mode vi')
+        self.win.addstr(self.gety(self.win),0, body)
+        self.refresh()
 
         def completer(text, state):
             options = [x for x in addr if x.startswith(text)]
@@ -73,63 +93,128 @@ class mylog(object):
             except IndexError:
                 return None
 
-        readline.set_completer(completer)
-
-        self.win.addstr(y,0, 'Enter category');y+=1
+        self.win.addstr(self.gety(self.win),0, 'Enter category');
+        if id:
+            self.win.addstr(self.gety(self.win),0,'org category:'+','.join(org_category))
+        self.refresh()
         while True:
             #line = raw_input('>>> ')
             curses.echo()
-            line = self.win.getstr(y,0);y+=1
+            self.win.addstr(self.gety(self.win),0,'> ')
+            self.refresh()
+            line = self.win.getstr(self.gety(self.win)-1,2);
             curses.noecho()
             if line == '':
                 break
             category.append(line)
-            self.win.addstr(y,0, ",".join(category));y+=1
+            self.win.addstr(self.gety(self.win)-1,0, ",".join(category));
+            self.refresh()
 
-        sql = u"insert into entry values (null, ?, ?)"
-        cursor.execute(sql, (datetime.datetime.now(), body))
-        lastid = cursor.lastrowid
-        sql = u"insert into category values (?, ?)"
-        for cat in category:
-            cursor.execute(sql, (lastid, cat))
+        if id:
+            cursor = self.connection.cursor()
+            cursor.execute(u"""update entry set body=? where id=?""", (body, id))
+            cursor.execute(u"delete from category where id=%d" % id)
+            sql = u"insert into category values (?, ?)"
+            for cat in category:
+                cursor.execute(sql, (id, cat))
+        else:
+            cursor = self.connection.cursor()
+            sql = u"insert into entry values (null, ?, ?)"
+            cursor.execute(sql, (datetime.datetime.now(), body))
+            lastid = cursor.lastrowid
+            sql = u"insert into category values (?, ?)"
+            for cat in category:
+                cursor.execute(sql, (lastid, cat))
 
         self.connection.commit()
         #self.connection.close()
+        if id:
+            self.display_entry(id)
+        else:
+            self.curses_main()
 
-    def curses_main(self,screen):
+    def curses_main(self,screen=None):
         cursor = self.connection.cursor()
         lastid = self.connection.execute(u"select max(id) from entry").fetchone()[0]
         id = self.display_entry(lastid)
         while 1:
-            c = self.win.getkey()
-#append new entry
-            if c == "a":
-                self.new_entry()
-                id = id
-            elif c == "n":
-                id = self.display_entry(id, -1)
-            elif c == "p":
-                id = self.display_entry(id, 1)
-            elif c == "q":
-                break
-            self.win.refresh()
+            if self.mode == "delete":
+                c = self.dialog.getkey()
+                if c == "y":
+                    #delete this entry
+                    self.display_statusline("delete this entry.")
+                    self.connection.execute(u"delete from entry where id=%d" % id)
+                    self.connection.execute(u"delete from category where id=%d" % id)
+                    self.mode = None
+                    del self.dialog
+                    self.win.touchwin()
+                elif c == "n":
+                    self.display_statusline("cancel delete.")
+                    self.mode = None
+                    del self.dialog
+                    self.win.touchwin()
+                #self.win.refresh()
+                #self.win.refresh(0,0,0,0,self.max_y-1,self.max_x)
+                self.refresh()
+            else:
+                c = self.win.getkey()
+                if c == "a":
+                    #append new entry
+                    self.new_entry()
+                elif c == "n":
+                    id = self.display_entry(id, -1)
+                elif c == "p":
+                    id = self.display_entry(id, 1)
+                elif c == "d":
+                    #delete this entry
+                    self.display_delete_dialog()
+                elif c == "e":
+                    #edit this entry
+                    self.new_entry(id)
+                elif c == "q":
+                    break
+            #self.win.refresh()
+            #self.win.refresh(0,0,0,0,self.max_y-1,self.max_x)
+            self.refresh()
         curses.endwin()
         self.connection.close()
 
     def display_entry(self,id,offset=0):
-        entry, category = self.get_entry(id+offset)
+        entry, category = self.get_entry(id,offset)
 
         if entry is not None:
             self.win.erase()
-            entry_date = entry[1].strftime('%Y/%m/%d%A %H:%M:%S')
+            entry_date = entry[1].strftime('%Y/%m/%d(%A) %H:%M:%S')
             category = "category:" + ",".join(category)
 
             self.win.addstr(0,0,entry_date)
             self.win.addstr(1,0,category)
-            self.win.addstr(3,0,entry[2])
+            self.win.hline(2,0,curses.ACS_HLINE, self.max_x)
+            #self.win.addstr(3,0,entry[2])
+            for line in entry[2].split('\n'):
+                self.win.addstr(self.gety(self.win),0,line);
+
+            self.display_statusline()
             return entry[0]
         else:
             return id
+
+    def display_delete_dialog(self):
+        self.mode = "delete"
+        self.dialog = self.win.subwin(4,20,int(self.max_y/2)-2,int(self.max_x/2)-10)
+        self.dialog.bkgd(curses.A_REVERSE)
+        self.dialog.addstr(1,1,"delete this entry?")
+        self.dialog.addstr(2,5,"> yes / no")
+        self.refresh()
+        #self.dialog.refresh()
+    def display_statusline(self,out_string = "n/p:next/pre a:add e:edit d:delete q:exit"):
+        self.statusline.clear()
+        self.statusline.addstr(0,0,"[mylog] %s" % out_string)
+        self.refresh()
+        #self.statusline.refresh(self.max_y-1,0,0,0,1,self.max_x)
+    def refresh(self):
+        #self.win.refresh(0,0,0,0,1000,self.max_x)
+        self.win.refresh(0,0,0,0,self.max_y-1,self.max_x)
 
 if __name__ == '__main__':
     a = mylog()

@@ -11,32 +11,34 @@ import sqlite3
 import locale
 locale.setlocale(locale.LC_ALL, '')
 
-class mylog(object):
+class mylog:
     def __init__(self):
-        #self.dbpath = "/home/watanab2/.mylog.db"
-        self.dbpath = "/home/watanab2/diary/data.db"
+        self.dbpath = os.environ['HOME']+"/.mylog.db"
 
         self.connection = sqlite3.connect(self.dbpath,isolation_level=None,detect_types=sqlite3.PARSE_DECLTYPES)
         self.connection.text_factory = str
-        self.all_category = None
 
-        self.masterwin = curses.initscr()
-        self.max_y, self.max_x = self.masterwin.getmaxyx()
-        self.win = curses.newpad(100,self.max_x)
+        self.win = curses.initscr()
         self.win.scrollok(True)
         self.win.idlok(True)
-        self.win.setscrreg(2,self.max_y-1)
+
+        self.max_y, self.max_x = self.win.getmaxyx()
         self.statusline = self.win.subwin(self.max_y-1,0)
+
+        self.win.setscrreg(3,self.max_y-2)
+
         curses.start_color()
         curses.use_default_colors()
         curses.noecho()
         curses.cbreak()
 
+        #gllobal variables
+        self.all_category = None
         self.mode = None
+        self.virtual_lines = []
+        self.scroll_value = 0
 
-    def update_category(self):
-        self.allupdate_category = map(lambda lst: lst[0], self.connection.execute(u"select distinct category from category").fetchall())
-
+    #retrive database
     def get_entry(self,id,offset):
         if offset == 0:
             entry = self.connection.execute(u"select * from entry where id=%s" % id).fetchone()
@@ -52,9 +54,14 @@ class mylog(object):
             category = None
         return entry, category
 
+    def update_category(self):
+        self.allupdate_category = map(lambda lst: lst[0], self.connection.execute(u"select distinct category from category").fetchall())
+
+
+    #curses wraper funcrions
     def gety(self,win):
         y,x = win.getyx()
-        return y+1
+        return min(y+1,self.max_y-2)
 
     def new_entry(self,id=None):
         self.win.clear()
@@ -117,6 +124,8 @@ class mylog(object):
             sql = u"insert into category values (?, ?)"
             for cat in category:
                 cursor.execute(sql, (id, cat))
+            self.connection.commit()
+            self.display_entry(id)
         else:
             cursor = self.connection.cursor()
             sql = u"insert into entry values (null, ?, ?)"
@@ -125,13 +134,8 @@ class mylog(object):
             sql = u"insert into category values (?, ?)"
             for cat in category:
                 cursor.execute(sql, (lastid, cat))
-
-        self.connection.commit()
-        #self.connection.close()
-        if id:
-            self.display_entry(id)
-        else:
-            self.curses_main()
+            self.connection.commit()
+            self.display_entry(lastid)
 
     def curses_main(self,screen=None):
         cursor = self.connection.cursor()
@@ -153,8 +157,6 @@ class mylog(object):
                     self.mode = None
                     del self.dialog
                     self.win.touchwin()
-                #self.win.refresh()
-                #self.win.refresh(0,0,0,0,self.max_y-1,self.max_x)
                 self.refresh()
             else:
                 c = self.win.getkey()
@@ -167,15 +169,23 @@ class mylog(object):
                     id = self.display_entry(id, 1)
                 elif c == "d":
                     #delete this entry
-                    self.display_delete_dialog()
+                    self.display_dialog()
                 elif c == "e":
                     #edit this entry
                     self.new_entry(id)
+                elif c == "j":
+                    #self.win.scroll(1)
+                    self.scroll_value -= 1
+                    id = self.display_entry(id)
+                elif c == "k":
+                    #self.win.scroll(-1)
+                    self.scroll_value += 1
+                    id = self.display_entry(id)
                 elif c == "q":
                     break
-            #self.win.refresh()
-            #self.win.refresh(0,0,0,0,self.max_y-1,self.max_x)
             self.refresh()
+        self.win.clear()
+        self.refresh()
         curses.endwin()
         self.connection.close()
 
@@ -190,31 +200,33 @@ class mylog(object):
             self.win.addstr(0,0,entry_date)
             self.win.addstr(1,0,category)
             self.win.hline(2,0,curses.ACS_HLINE, self.max_x)
-            #self.win.addstr(3,0,entry[2])
+            self.win.move(2,0)
             for line in entry[2].split('\n'):
                 self.win.addstr(self.gety(self.win),0,line);
 
             self.display_statusline()
+            self.win.scroll(self.scroll_value)
             return entry[0]
         else:
             return id
 
-    def display_delete_dialog(self):
+    def display_dialog(self):
         self.mode = "delete"
-        self.dialog = self.win.subwin(4,20,int(self.max_y/2)-2,int(self.max_x/2)-10)
+        self.dialog = curses.newwin(4,20,int(self.max_y/2)-2,int(self.max_x/2)-10)
         self.dialog.bkgd(curses.A_REVERSE)
         self.dialog.addstr(1,1,"delete this entry?")
         self.dialog.addstr(2,5,"> yes / no")
         self.refresh()
-        #self.dialog.refresh()
     def display_statusline(self,out_string = "n/p:next/pre a:add e:edit d:delete q:exit"):
         self.statusline.clear()
+        #out_string,x = self.win.getparyx()
         self.statusline.addstr(0,0,"[mylog] %s" % out_string)
         self.refresh()
         #self.statusline.refresh(self.max_y-1,0,0,0,1,self.max_x)
     def refresh(self):
+        self.win.refresh()
         #self.win.refresh(0,0,0,0,1000,self.max_x)
-        self.win.refresh(0,0,0,0,self.max_y-1,self.max_x)
+        #self.win.refresh(0,0,0,0,self.max_y-1,self.max_x)
 
 if __name__ == '__main__':
     a = mylog()

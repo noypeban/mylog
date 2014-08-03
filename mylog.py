@@ -125,6 +125,7 @@ class mylog:
             for cat in category:
                 cursor.execute(sql, (id, cat))
             self.connection.commit()
+            self.scroll_value = 0
             self.display_entry(id)
         else:
             cursor = self.connection.cursor()
@@ -135,11 +136,13 @@ class mylog:
             for cat in category:
                 cursor.execute(sql, (lastid, cat))
             self.connection.commit()
+            self.scroll_value = 0
             self.display_entry(lastid)
 
     def curses_main(self,screen=None):
         cursor = self.connection.cursor()
         lastid = self.connection.execute(u"select max(id) from entry").fetchone()[0]
+        self.scroll_value = 0
         id = self.display_entry(lastid)
         while 1:
             if self.mode == "delete":
@@ -164,8 +167,10 @@ class mylog:
                     #append new entry
                     self.new_entry()
                 elif c == "n":
+                    self.scroll_value = 0
                     id = self.display_entry(id, -1)
                 elif c == "p":
+                    self.scroll_value = 0
                     id = self.display_entry(id, 1)
                 elif c == "d":
                     #delete this entry

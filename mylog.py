@@ -35,7 +35,6 @@ class mylog:
         #gllobal variables
         self.all_category = None
         self.mode = None
-        self.virtual_lines = []
         self.scroll_value = 0
 
     #retrive database
@@ -64,7 +63,8 @@ class mylog:
         return min(y+1,self.max_y-2)
 
     def new_entry(self,id=None):
-        self.win.clear()
+        #self.win.clear()
+        self.win.erase()
         self.update_category()
         category = []
 
@@ -72,12 +72,6 @@ class mylog:
             entry, org_category = self.get_entry(id,0)
             body = entry[2]
 
-        self.win.addstr(self.gety(self.win)-1,0,'App for my memo.');
-        self.win.addstr(self.gety(self.win),0,'===');
-
-        self.win.addstr(self.gety(self.win),0,'Enter memo body');
-        self.win.addstr(self.gety(self.win),0,'---');
-        self.refresh()
         tmp_file = tempfile.mkstemp(suffix="_edit_entry.md")
         if id:
             f = open(tmp_file[1],'w')
@@ -90,7 +84,14 @@ class mylog:
         f.close()
         os.remove(tmp_file[1])
 
-        self.win.addstr(self.gety(self.win),0, body)
+        self.win.addstr(self.gety(self.win)-1,0,'App for my memo.');
+        self.win.addstr(self.gety(self.win),0,'===');
+
+        self.win.addstr(self.gety(self.win),0,'Enter memo body');
+        self.win.addstr(self.gety(self.win),0,'---');
+
+        for line in body.split('\n'):
+            self.win.addstr(self.gety(self.win),0,line);
         self.refresh()
 
         def completer(text, state):
@@ -104,18 +105,24 @@ class mylog:
         if id:
             self.win.addstr(self.gety(self.win),0,'org category:'+','.join(org_category))
         self.refresh()
+        curses.echo()
+        y = self.gety(self.win)
+        self.win.addstr(y,0, "category:")
         while True:
             #line = raw_input('>>> ')
-            curses.echo()
-            self.win.addstr(self.gety(self.win),0,'> ')
-            self.refresh()
-            line = self.win.getstr(self.gety(self.win)-1,2);
-            curses.noecho()
+            self.win.move(y+1,0)
+            self.win.deleteln()
+            self.win.addstr(y+1,0,'> ')
+            #self.refresh()
+            line = self.win.getstr(y+1,2)
             if line == '':
                 break
             category.append(line)
-            self.win.addstr(self.gety(self.win)-1,0, ",".join(category));
+            self.win.move(y,0)
+            self.win.deleteln()
+            self.win.addstr(y,0, "category:" + ",".join(category))
             self.refresh()
+        curses.noecho()
 
         if id:
             cursor = self.connection.cursor()
@@ -178,11 +185,12 @@ class mylog:
                 elif c == "e":
                     #edit this entry
                     self.new_entry(id)
-                elif c == "j":
-                    #self.win.scroll(1)
-                    self.scroll_value -= 1
-                    id = self.display_entry(id)
                 elif c == "k":
+                    if self.scroll_value > 0:
+                        #self.win.scroll(1)
+                        self.scroll_value -= 1
+                        id = self.display_entry(id)
+                elif c == "j":
                     #self.win.scroll(-1)
                     self.scroll_value += 1
                     id = self.display_entry(id)
